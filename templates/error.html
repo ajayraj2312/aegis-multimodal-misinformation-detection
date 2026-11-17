@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ code }}{% endblock %}
+{% block crumb %}Error{% endblock %}
+{% block heading %}{{ code }}{% endblock %}
+
+{% block content %}
+<div class="card-x" style="text-align:center;padding:48px 24px">
+  <div style="font-size:44px;font-weight:800;letter-spacing:-1px;color:#5b8dff">{{ code }}</div>
+  <p style="color:#a9bcd9;margin-top:10px">{{ message }}</p>
+  <div style="display:flex;gap:10px;justify-content:center;margin-top:20px">
+    <a class="btn-x primary" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+    <a class="btn-x ghost" href="{{ url_for('analyze') }}">Analyze a post</a>
+  </div>
+</div>
+{% endblock %}

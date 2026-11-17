@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Model Performance{% endblock %}
+{% block crumb %}Evaluation{% endblock %}
+{% block heading %}Model Performance Analysis{% endblock %}
+
+{% block content %}
+{% if not metrics %}
+  <div class="alert-x danger">
+    No evaluation report found. Run <span class="mono">python -m src.train</span> and
+    <span class="mono">python -m src.evaluate</span> to generate
+    <span class="mono">models/metrics.json</span>.
+  </div>
+{% else %}
+{% set t = metrics.models.text_only %}
+{% set i = metrics.models.image_only %}
+{% set f = metrics.models.fusion %}
+
+<div class="stat-grid" style="grid-template-columns: repeat(4, minmax(0,1fr));margin-bottom:16px">
+  <div class="stat teal">
+    <div class="k">Multimodal accuracy</div>
+    <div class="v">{{ (f.accuracy * 100) | round(1) }}%</div>
+    <div class="d">held-out test split</div>
+  </div>
+  <div class="stat">
+    <div class="k">Fusion F1-score</div>
+    <div class="v">{{ (f.f1 * 100) | round(1) }}%</div>
+    <div class="d">threshold {{ (f.threshold * 100) | round(1) }}%</div>
+  </div>
+  <div class="stat">
+    <div class="k">Fusion AUC</div>
+    <div class="v">{{ (f.auc * 100) | round(1) }}%</div>
+    <div class="d">PR-AUC {{ (f.average_precision * 100) | round(1) }}%</div>
+  </div>
+  <div class="stat warn">
+    <div class="k">Test samples</div>
+    <div class="v">{{ metrics.dataset.split.test }}</div>
+    <div class="d">{{ metrics.dataset.test_class_balance.credible }} credible / {{ metrics.dataset.test_class_balance.misleading }} misleading</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card-x">
+    <div class="card-title-x"><span>Modality comparison</span><span class="hint">same test split, same protocol</span></div>
+    <div class="chart-box lg"><canvas id="compareChart"></canvas></div>
+  </div>
+  <div class="card-x">
+    <div class="card-title-x"><span>ROC curves</span><span class="hint">test split</span></div>
+    <div class="chart-box lg"><canvas id="rocChart"></canvas></div>
+  </div>
+</div>
+
+<div class="grid-3" style="margin-top:16px">
+  {% for key, m in [('text_only', t), ('image_only', i), ('fusion', f)] %}
+  <div class="card-x">
+    <div class="card-title-x">
+      <span>{{ m.name }}</span>
+      <span class="hint">AUC {{ (m.auc * 100) | round(1) }}%</span>
+    </div>
+    <table class="confusion">
+      <thead>
+        <tr><th></th><th>Pred. credible</th><th>Pred. misleading</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>Actual credible</th>
+          <td class="cell-good">{{ m.confusion_matrix.tn }}</td>
+          <td class="cell-bad">{{ m.confusion_matrix.fp }}</td>
+        </tr>
+        <tr>
+          <th>Actual misleading</th>
+          <td class="cell-bad">{{ m.confusion_matrix.fn }}</td>
+          <td class="cell-good">{{ m.confusion_matrix.tp }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px">
+      <div class="metric-row"><span class="m-name">Accuracy</span><span class="m-val">{{ (m.accuracy * 100) | round(1) }}%</span></div>
+      <div class="metric-row"><span class="m-name">Precision</span><span class="m-val">{{ (m.precision * 100) | round(1) }}%</span></div>
+      <div class="metric-row"><span class="m-name">Recall</span><span class="m-val">{{ (m.recall * 100) | round(1) }}%</span></div>
+      <div class="metric-row"><span class="m-name">F1-score</span><span class="m-val">{{ (m.f1 * 100) | round(1) }}%</span></div>
+      <div class="metric-row"><span class="m-name">AUC</span><span class="m-val">{{ (m.auc * 100) | round(1) }}%</span></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="grid-2" style="margin-top:16px">
+  <div class="card-x">
+    <div class="card-title-x"><span>Training curves</span><span class="hint">validation accuracy per epoch</span></div>
+    <div class="chart-box"><canvas id="trainChart"></canvas></div>
+  </div>
+  <div class="card-x">
+    <div class="card-title-x"><span>Cross-modal consistency head</span><span class="hint">fusion network auxiliary output</span></div>
+    {% set c = metrics.cross_modal_consistency %}
+    <div class="metric-row"><span class="m-name">Consistency accuracy</span><span class="m-val">{{ (c.accuracy * 100) | round(1) }}%</span></div>
+    <div class="metric-row"><span class="m-name">Consistency AUC</span><span class="m-val">{{ (c.auc * 100) | round(1) }}%</span></div>
+    <div class="metric-row"><span class="m-name">Mean cosine · consistent pairs</span><span class="m-val mono">{{ '%+.4f' | format(c.mean_cosine_consistent) }}</span></div>
+    <div class="metric-row"><span class="m-name">Mean cosine · inconsistent pairs</span><span class="m-val mono">{{ '%+.4f' | format(c.mean_cosine_inconsistent) }}</span></div>
+    <div class="metric-row"><span class="m-name">Mean gate weight · text</span><span class="m-val mono">{{ c.modality_gates.text }}</span></div>
+    <div class="metric-row"><span class="m-name">Mean gate weight · image</span><span class="m-val mono">{{ c.modality_gates.image }}</span></div>
+    <p class="hero-note" style="margin-top:12px">
+      The consistency head is trained with pair-level labels (does the image topic match the
+      claim topic?) and is separate from the credibility classifier, so a post can be
+      credible-with-consistent-image, credible-with-mismatched-image, or misleading on text alone.
+    </p>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-top:16px">
+  <div class="card-x">
+    <div class="card-title-x"><span>Dataset &amp; protocol</span></div>
+    <div class="kv">
+      <div class="k">Benchmark</div><div class="v">{{ metrics.dataset.name }}</div>
+      <div class="k">Claims</div><div class="v">{{ metrics.dataset.credible_claims }} credible / {{ metrics.dataset.misleading_claims }} misleading</div>
+      <div class="k">Text–image pairs</div><div class="v">{{ metrics.dataset.pairs }}</div>
+      <div class="k">Split (train / val / test)</div>
+      <div class="v">{{ metrics.dataset.split.train }} / {{ metrics.dataset.split.validation }} / {{ metrics.dataset.split.test }}</div>
+      <div class="k">Split seed</div><div class="v mono">{{ metrics.dataset.seed }}</div>
+      <div class="k">Text encoder</div><div class="v mono">{{ metrics.encoders.text.model }}</div>
+      <div class="k">Image encoder</div><div class="v mono">{{ metrics.encoders.image.model }}</div>
+      <div class="k">Threshold selection</div><div class="v">F1-optimal on validation split</div>
+      <div class="k">Report generated</div><div class="v mono">{{ metrics.generated_at[:16].replace('T', ' ') }}</div>
+    </div>
+  </div>
+
+  <div class="card-x">
+    <div class="card-title-x"><span>Reading these numbers honestly</span></div>
+    <p class="hero-note">
+      Every value on this page is computed by <span class="mono">src/evaluate.py</span> on a
+      held-out test split that no model saw during training or threshold selection. Nothing is
+      hard-coded.
+    </p>
+    <p class="hero-note" style="margin-top:12px">
+      The benchmark is a <strong>proxy corpus</strong>: curated claim texts paired with
+      procedurally rendered topic scenes. It is designed to be regenerable and inspectable, not
+      to represent the full diversity of real-world misinformation. Accuracy on this benchmark
+      therefore should not be read as expected real-world accuracy.
+    </p>
+    <p class="hero-note" style="margin-top:12px">
+      The image-only model is expected to be weak: a single image carries little information
+      about whether the accompanying claim is true. Its usefulness in this architecture is as a
+      consistency reference for the fusion layer, not as a standalone detector.
+    </p>
+    <div class="alert-x info" style="margin-top:14px">
+      Reproduce with:
+      <span class="mono">python -m src.train</span> then
+      <span class="mono">python -m src.evaluate</span>.
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if metrics %}
+<script>
+  const M = {{ metrics | tojson }};
+  const order = ["text_only", "image_only", "fusion"];
+  const labels = ["Text-only Transformer", "Image-only CNN", "Multimodal Fusion"];
+  const names = order.map((k) => M.models[k].name);
+  const metricKeys = ["accuracy", "precision", "recall", "f1", "auc"];
+  const colours = ["rgba(91,141,255,.75)", "rgba(255,180,84,.8)", "rgba(56,217,196,.8)"];
+
+  new Chart(document.getElementById("compareChart"), {
+    type: "bar",
+    data: {
+      labels: ["Accuracy", "Precision", "Recall", "F1", "AUC"],
+      datasets: order.map((k, idx) => ({
+        label: labels[idx],
+        data: metricKeys.map((m) => M.models[k][m] * 100),
+        backgroundColor: colours[idx],
+        borderRadius: 5,
+        barThickness: 14
+      }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { grid: { display: false }, ticks: { color: "#8fa1c0" } },
+        y: { beginAtZero: true, max: 100, grid: { color: "rgba(122,148,196,.09)" },
+             ticks: { color: "#7f92b3", callback: (v) => v + "%" } }
+      },
+      plugins: {
+        legend: { position: "bottom", labels: { boxWidth: 10 } },
+        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}%` } }
+      }
+    }
+  });
+
+  new Chart(document.getElementById("rocChart"), {
+    type: "line",
+    data: {
+      datasets: order.map((k, idx) => ({
+        label: labels[idx] + ` (AUC ${(M.models[k].auc * 100).toFixed(1)}%)`,
+        data: M.models[k].roc.fpr.map((x, j) => ({ x, y: M.models[k].roc.tpr[j] })),
+        borderColor: ["#5b8dff", "#ffb454", "#38d9c4"][idx],
+        backgroundColor: "transparent",
+        borderWidth: 2, pointRadius: 0, tension: 0.15
+      })).concat([{
+        label: "Chance",
+        data: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+        borderColor: "rgba(143,161,192,.4)", borderDash: [4, 4], borderWidth: 1, pointRadius: 0
+      }])
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { type: "linear", min: 0, max: 1, title: { display: true, text: "False positive rate" },
+             grid: { color: "rgba(122,148,196,.09)" }, ticks: { color: "#7f92b3" } },
+        y: { min: 0, max: 1, title: { display: true, text: "True positive rate" },
+             grid: { color: "rgba(122,148,196,.09)" }, ticks: { color: "#7f92b3" } }
+      },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 10 } } }
+    }
+  });
+
+  const hist = M.history || {};
+  const epochs = (hist.fusion || []).map((e) => e.epoch);
+  new Chart(document.getElementById("trainChart"), {
+    type: "line",
+    data: {
+      labels: epochs,
+      datasets: order.filter((k) => hist[k] && hist[k].length).map((k, idx) => ({
+        label: labels[order.indexOf(k)],
+        data: hist[k].map((e) => e.val_accuracy * 100),
+        borderColor: ["#5b8dff", "#ffb454", "#38d9c4"][order.indexOf(k)],
+        backgroundColor: "transparent", borderWidth: 2, pointRadius: 0, tension: 0.25
+      }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { title: { display: true, text: "Epoch" }, grid: { color: "rgba(122,148,196,.09)" },
+             ticks: { color: "#7f92b3" } },
+        y: { beginAtZero: true, max: 100, grid: { color: "rgba(122,148,196,.09)" },
+             ticks: { color: "#7f92b3", callback: (v) => v + "%" } }
+      },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 10 } } }
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}

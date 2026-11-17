@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+{% block crumb %}Records{% endblock %}
+{% block heading %}Prediction History{% endblock %}
+
+{% block content %}
+<div class="stat-grid" style="grid-template-columns: repeat(4, minmax(0,1fr));margin-bottom:16px">
+  <div class="stat"><div class="k">Total records</div><div class="v">{{ stats.total }}</div></div>
+  <div class="stat credible"><div class="k">Credible</div><div class="v" style="color:#4ddfa4">{{ stats.credible }}</div></div>
+  <div class="stat misleading"><div class="k">Misleading</div><div class="v" style="color:#ff8496">{{ stats.misleading }}</div></div>
+  <div class="stat teal"><div class="k">Avg confidence</div><div class="v">{{ stats.avg_confidence }}%</div></div>
+</div>
+
+<div class="card-x">
+  <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+    <div style="flex:1;min-width:220px">
+      <label class="field-label">Search</label>
+      <input class="input-x" name="q" value="{{ listing.query }}" placeholder="Search post text, source or platform…">
+    </div>
+    <div style="min-width:150px">
+      <label class="field-label">Classification</label>
+      <select class="select-x" name="label">
+        <option value="">All results</option>
+        <option value="Credible" {{ 'selected' if listing.label == 'Credible' }}>Credible</option>
+        <option value="Misleading" {{ 'selected' if listing.label == 'Misleading' }}>Misleading</option>
+      </select>
+    </div>
+    <div style="min-width:150px">
+      <label class="field-label">Modality</label>
+      <select class="select-x" name="modality">
+        <option value="">All</option>
+        <option value="multimodal" {{ 'selected' if listing.modality == 'multimodal' }}>Text + image</option>
+        <option value="text" {{ 'selected' if listing.modality == 'text' }}>Text only</option>
+      </select>
+    </div>
+    <button class="btn-x primary" type="submit">Filter</button>
+    <a class="btn-x ghost" href="{{ url_for('history') }}">Reset</a>
+  </form>
+
+  {% if listing.rows %}
+  <table class="table-x">
+    <thead>
+      <tr>
+        <th>#</th><th>Post</th><th>Result</th><th>Confidence</th>
+        <th>Mode</th><th>Consistency</th><th>Source</th><th>When (UTC)</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in listing.rows %}
+      <tr>
+        <td class="mono muted">{{ row.id }}</td>
+        <td class="cell-text"><span class="clamp-2">{{ row.text }}</span></td>
+        <td>
+          <span class="badge-x {{ 'credible' if row.label == 'Credible' else 'misleading' }}">{{ row.label }}</span>
+        </td>
+        <td>
+          <div class="mono">{{ (row.confidence * 100) | round(1) }}%</div>
+          <div class="meter" style="margin-top:4px;width:74px">
+            <span data-fill="{{ (row.confidence * 100) | round(1) }}"></span>
+          </div>
+        </td>
+        <td class="muted tiny">{{ 'text + image' if row.modality == 'multimodal' else 'text only' }}</td>
+        <td class="tiny">
+          {% if row.consistency_label %}
+            <span class="tag {{ 'green' if row.consistency_label == 'Consistent' else 'red' }}">
+              {{ row.consistency_label }}
+            </span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="tiny muted">{{ row.platform or '—' }}{% if row.source %}<br>{{ row.source }}{% endif %}</td>
+        <td class="tiny mono muted">{{ row.created_at[:16].replace('T', ' ') }}</td>
+        <td><a class="btn-x ghost sm" href="{{ url_for('result', analysis_id=row.id) }}">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pager">
+    <span class="tiny muted" style="margin-right:auto">
+      {{ listing.total }} records · page {{ listing.page }} of {{ listing.pages }}
+    </span>
+    {% if listing.page > 1 %}
+      <a href="{{ url_for('history', q=listing.query, label=listing.label, modality=listing.modality, page=listing.page - 1) }}">‹ Prev</a>
+    {% else %}<span class="off">‹ Prev</span>{% endif %}
+    {% for p in range(1, listing.pages + 1) %}
+      {% if p <= 2 or p > listing.pages - 2 or (p - listing.page) | abs <= 1 %}
+        {% if p == listing.page %}
+          <span class="on">{{ p }}</span>
+        {% else %}
+          <a href="{{ url_for('history', q=listing.query, label=listing.label, modality=listing.modality, page=p) }}">{{ p }}</a>
+        {% endif %}
+      {% elif p == 3 or p == listing.pages - 2 %}
+        <span class="off">…</span>
+      {% endif %}
+    {% endfor %}
+    {% if listing.page < listing.pages %}
+      <a href="{{ url_for('history', q=listing.query, label=listing.label, modality=listing.modality, page=listing.page + 1) }}">Next ›</a>
+    {% else %}<span class="off">Next ›</span>{% endif %}
+  </div>
+  {% else %}
+    <p class="muted tiny">No records match this filter. <a href="{{ url_for('analyze') }}">Analyze a post</a> to create one.</p>
+  {% endif %}
+</div>
+{% endblock %}

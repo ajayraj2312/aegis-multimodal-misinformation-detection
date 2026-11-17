@@ -1,0 +1,16 @@
+# Web layer
+Flask==3.0.3
+Werkzeug==3.0.3
+Jinja2==3.1.4
+gunicorn==22.0.0
+
+# Data / metrics
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.3.2
+Pillow==10.4.0
+
+# Deep learning
+torch==2.2.2
+torchvision==0.17.2
+transformers==4.44.2

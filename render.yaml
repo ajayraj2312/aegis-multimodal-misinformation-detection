@@ -1,0 +1,32 @@
+# Render Blueprint for the multimodal misinformation detection app.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: aegis-misinformation-detection
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 180 --preload"
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.10.13"
+      - key: TEXT_MODEL_NAME
+        value: distilbert-base-uncased
+      # Keep the downloaded weights inside the build context so boots are fast.
+      - key: HF_HOME
+        value: /opt/render/project/.cache/huggingface
+      - key: TORCH_HOME
+        value: /opt/render/project/.cache/torch
+      # int8 dynamic quantisation keeps the transformer inside the free tier's 512 MB.
+      - key: MISINFO_QUANTIZE
+        value: "1"
+      - key: MISINFO_THREADS
+        value: "1"
+      - key: SEED_DEMO_ON_EMPTY
+        value: "1"
+      - key: SECRET_KEY
+        generateValue: true

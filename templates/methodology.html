@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Methodology{% endblock %}
+{% block crumb %}Documentation{% endblock %}
+{% block heading %}Methodology &amp; Limitations{% endblock %}
+
+{% block content %}
+<div class="grid-2">
+  <div class="card-x">
+    <div class="card-title-x"><span>System architecture</span><span class="hint">7 layers</span></div>
+    <div class="tiny" style="line-height:1.9;color:#a9bcd9">
+      <strong>1 · Data acquisition &amp; preprocessing</strong> — text is validated, trimmed and
+      WordPiece-tokenised; images are decoded, converted to RGB, resized to 224×224 and
+      normalised with ImageNet statistics.<br>
+      <strong>2 · Text feature extraction</strong> — frozen DistilBERT-base-uncased; the masked
+      mean of the last hidden state gives a 768-d contextual embedding.<br>
+      <strong>3 · Image feature extraction</strong> — frozen ResNet18 (ImageNet weights) with the
+      classifier head removed; global average pooling gives a 512-d visual embedding.<br>
+      <strong>4 · Projection</strong> — a two-layer MLP per modality maps both into a shared
+      256-d, L2-normalised space.<br>
+      <strong>5 · Cross-modal consistency</strong> — cosine similarity between the projected
+      text and image vectors, plus a dedicated consistency head that consumes the fused
+      representation.<br>
+      <strong>6 · Fusion</strong> — learned modality gates weight each projection; the gated
+      concatenation is passed through a 512 → 256 → 64 MLP.<br>
+      <strong>7 · Classification</strong> — a linear head outputs Credible / Misleading; the
+      softmax probability is reported as the confidence score.
+    </div>
+  </div>
+
+  <div class="card-x">
+    <div class="card-title-x"><span>Training protocol</span></div>
+    <div class="kv">
+      <div class="k">Optimiser</div><div class="v">AdamW, lr 1.2e-3, cosine schedule</div>
+      <div class="k">Loss</div><div class="v">class-weighted cross-entropy + 0.35 × consistency CE</div>
+      <div class="k">Batching / epochs</div><div class="v">48 / up to 80 with early stopping</div>
+      <div class="k">Validation</div><div class="v">15% stratified split, loss-based checkpointing</div>
+      <div class="k">Threshold</div><div class="v">F1-optimal on validation, then frozen</div>
+      <div class="k">Reported metrics</div><div class="v">computed once on the 15% test split</div>
+      <div class="k">Encoders</div><div class="v">frozen — only the fusion/baseline heads are trained</div>
+    </div>
+    <p class="hero-note" style="margin-top:12px">
+      Because the encoders are frozen, the fusion head is trained on cached embeddings. This
+      keeps training to seconds, is fully reproducible with a fixed seed, and makes it easy to
+      swap in a stronger encoder later — but it also means the encoders are not fine-tuned on
+      this task.
+    </p>
+  </div>
+</div>
+
+<div class="card-x" style="margin-top:16px">
+  <div class="card-title-x"><span>What the labels mean</span></div>
+  <div class="grid-2">
+    <div>
+      <div class="tiny" style="color:#a9bcd9;line-height:1.85">
+        A post is labelled <span class="tag">Misleading</span> when the claim text itself carries
+        misinformation signals, <em>or</em> when the attached image does not match the topic the
+        text describes. It is labelled <span class="tag green">Credible</span> when the text is
+        credible and the image topic matches — and also for 22% of credible-text posts whose
+        image is deliberately mismatched, because an illustrative or stock image is not by
+        itself misinformation. That deliberate ambiguity is what stops the benchmark from being
+        trivially separable and is why no model can reach a perfect score on it.
+      </div>
+    </div>
+    <div>
+      <div class="tiny" style="color:#a9bcd9;line-height:1.85">
+        The consequence is intentional: a text-only model cannot separate a genuine claim
+        from the same claim paired with an unrelated image, because nothing in the text looks
+        wrong. That is precisely the gap that motivates the multimodal design, and it shows up
+        as the recall gap on the evaluation page (0.800 text-only vs 0.967 fusion). Half of the
+        mismatched images also come from visually adjacent topics, and 12% of images are
+        heavily degraded, so the visual branch cannot simply memorise six scene categories.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card-x" style="margin-top:16px">
+  <div class="card-title-x"><span>Limitations — read before quoting any number</span></div>
+  <div class="stack-sm tiny" style="color:#a9bcd9;line-height:1.8">
+    <p style="margin:0"><strong>1. Proxy benchmark.</strong> The shipped benchmark is built from
+      curated claim texts and procedurally rendered topic scenes. It proves the pipeline learns
+      and that fusion helps <em>on this corpus</em>. It does not establish real-world accuracy,
+      and the numbers must not be presented as benchmark-comparable to Fakeddit/Weibo results.</p>
+    <p style="margin:0"><strong>2. No manipulation forensics.</strong> ResNet18 is a generic
+      image classifier backbone. It cannot prove an image was edited or AI-generated. The
+      "visual artefact indicators" on the result page are transparent pixel statistics
+      (overlay-band edge density, JPEG quantisation estimate, blockiness) and are labelled as
+      heuristics.</p>
+    <p style="margin:0"><strong>3. Confidence ≠ truth.</strong> A 92% score means the network is
+      confident about its own decision boundary, not that a fact-checker has verified the claim.
+      Out-of-distribution posts can be confidently wrong.</p>
+    <p style="margin:0"><strong>4. Frozen encoders.</strong> Fine-tuning DistilBERT and ResNet18
+      on a large real corpus (e.g. Fakeddit, MM-COVID, Weibo) is the natural next step and is
+      expected to change these numbers substantially.</p>
+    <p style="margin:0"><strong>5. Language and scope.</strong> The text encoder is
+      English-only (uncased DistilBERT) and the pipeline handles a single image with no social
+      context (shares, accounts, propagation).</p>
+    <p style="margin:0"><strong>6. Storage on free hosting.</strong> SQLite and uploaded images
+      live on the instance filesystem. Render's free tier has an ephemeral disk, so records are
+      lost on redeploy unless a persistent disk is attached.</p>
+  </div>
+</div>
+
+<div class="card-x" style="margin-top:16px">
+  <div class="card-title-x"><span>Retraining &amp; extending</span></div>
+  <div class="tiny mono" style="color:#a9bcd9;line-height:2">
+    python -m src.train      # build features, split, train 3 heads<br>
+    python -m src.evaluate   # write models/metrics.json for this page<br>
+    python scripts/seed_demo.py   # optional: real pipeline runs over sample posts<br>
+  </div>
+  <p class="hero-note" style="margin-top:12px">
+    To use your own corpus, replace <span class="mono">src/benchmark.py</span> with a loader that
+    returns the same sample dicts (<span class="mono">text, text_topic, image_topic, label,
+    consistency, image_path</span>) and re-run the two commands. Nothing else in the pipeline
+    needs to change.
+  </p>
+</div>
+
+<div class="alert-x" style="margin-top:16px">{{ disclaimer }}</div>
+{% endblock %}

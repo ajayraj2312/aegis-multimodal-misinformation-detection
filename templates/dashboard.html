@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block crumb %}Analytics{% endblock %}
+{% block heading %}Misinformation Analytics{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn-x primary sm" href="{{ url_for('analyze') }}">+ Analyze a post</a>
+{% endblock %}
+
+{% block content %}
+{% if not models_ready %}
+  <div class="alert-x danger" style="margin-bottom:16px">
+    The classifier checkpoints were not found in <span class="mono">models/</span>.
+    Run <span class="mono">python -m src.train &amp;&amp; python -m src.evaluate</span> to generate them.
+  </div>
+{% endif %}
+
+<div class="stat-grid">
+  <div class="stat">
+    <div class="k">Posts analyzed</div>
+    <div class="v">{{ stats.total }}</div>
+    <div class="d">{{ stats.last_7_days }} in the last 7 days</div>
+  </div>
+  <div class="stat credible">
+    <div class="k">Credible</div>
+    <div class="v" style="color:#4ddfa4">{{ stats.credible }}</div>
+    <div class="d">{{ stats.credible_pct }}% of all analyses</div>
+  </div>
+  <div class="stat misleading">
+    <div class="k">Misleading</div>
+    <div class="v" style="color:#ff8496">{{ stats.misleading }}</div>
+    <div class="d">{{ stats.misleading_pct }}% of all analyses</div>
+  </div>
+  <div class="stat teal">
+    <div class="k">Avg. confidence</div>
+    <div class="v">{{ stats.avg_confidence }}%</div>
+    <div class="d">mean of predicted-class scores</div>
+  </div>
+  <div class="stat">
+    <div class="k">Text-only</div>
+    <div class="v">{{ stats.text_only }}</div>
+    <div class="d">single-modality analyses</div>
+  </div>
+  <div class="stat warn">
+    <div class="k">Text + image</div>
+    <div class="v">{{ stats.multimodal }}</div>
+    <div class="d">{{ stats.inconsistent }} flagged cross-modal inconsistencies</div>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-top:16px">
+  <div class="card-x">
+    <div class="card-title-x">
+      <span>Credibility distribution</span>
+      <span class="hint">{{ stats.total }} stored records</span>
+    </div>
+    {% if stats.total %}
+      <div class="chart-box"><canvas id="distChart"></canvas></div>
+    {% else %}
+      <p class="muted tiny">No analyses stored yet. Run your first analysis to populate this chart.</p>
+    {% endif %}
+  </div>
+
+  <div class="card-x">
+    <div class="card-title-x">
+      <span>Detection trend · last 14 days</span>
+      <span class="hint">records per day</span>
+    </div>
+    <div class="chart-box"><canvas id="trendChart"></canvas></div>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-top:16px">
+  <div class="card-x">
+    <div class="card-title-x">
+      <span>Recent detection activity</span>
+      <a class="hint" href="{{ url_for('history') }}">View all →</a>
+    </div>
+    {% if recent %}
+    <table class="table-x">
+      <thead>
+        <tr><th>Post</th><th>Result</th><th>Confidence</th><th>Mode</th><th>When (UTC)</th></tr>
+      </thead>
+      <tbody>
+        {% for row in recent %}
+        <tr onclick="window.location='{{ url_for('result', analysis_id=row.id) }}'" style="cursor:pointer">
+          <td class="cell-text"><span class="clamp-2">{{ row.text }}</span></td>
+          <td>
+            <span class="badge-x {{ 'credible' if row.label == 'Credible' else 'misleading' }}">
+              {{ row.label }}
+            </span>
+          </td>
+          <td class="mono">{{ (row.confidence * 100) | round(1) }}%</td>
+          <td class="muted tiny">{{ 'Text + image' if row.modality == 'multimodal' else 'Text only' }}</td>
+          <td class="muted tiny mono">{{ row.created_at[:16].replace('T', ' ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted tiny">No activity yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card-x">
+    <div class="card-title-x">
+      <span>Source platforms</span>
+      <span class="hint">where posts came from</span>
+    </div>
+    {% if platforms %}
+      <div class="chart-box sm"><canvas id="platformChart"></canvas></div>
+    {% else %}
+      <p class="muted tiny">No platform data yet.</p>
+    {% endif %}
+    <div style="margin-top:14px" class="kv">
+      <div class="k">Average decision latency</div>
+      <div class="v">{{ stats.avg_latency_ms }} ms</div>
+      <div class="k">Mean misleading probability</div>
+      <div class="v">{{ stats.avg_misleading_prob }}%</div>
+      <div class="k">Last activity</div>
+      <div class="v">{{ stats.last_seen[:16].replace('T', ' ') if stats.last_seen else '—' }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card-x" style="margin-top:16px">
+  <div class="card-title-x">
+    <span>Model snapshot</span>
+    <a class="hint" href="{{ url_for('performance') }}">Full evaluation →</a>
+  </div>
+  {% if metrics %}
+    <div class="grid-3">
+      {% for key, label in [('text_only','Text-only Transformer'), ('image_only','Image-only CNN'), ('fusion','Multimodal Fusion')] %}
+        {% set m = metrics.models[key] %}
+        <div>
+          <div class="tiny muted" style="margin-bottom:8px">{{ label }}</div>
+          <div class="metric-row"><span class="m-name">Accuracy</span><span class="m-val">{{ (m.accuracy * 100) | round(1) }}%</span></div>
+          <div class="metric-row"><span class="m-name">F1-score</span><span class="m-val">{{ (m.f1 * 100) | round(1) }}%</span></div>
+          <div class="metric-row"><span class="m-name">AUC</span><span class="m-val">{{ (m.auc * 100) | round(1) }}%</span></div>
+        </div>
+      {% endfor %}
+    </div>
+    <p class="hero-note" style="margin-top:14px">
+      Measured on the held-out test split of the bundled proxy benchmark
+      ({{ metrics.dataset.split.test }} samples, seed {{ metrics.dataset.seed }}).
+      These are benchmark numbers, not claims about real-world accuracy.
+    </p>
+  {% else %}
+    <p class="muted tiny">Evaluation metrics are not available yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const trend = {{ trend | tojson }};
+  const stats = {{ stats | tojson }};
+  const platforms = {{ platforms | tojson }};
+
+  function gridOpts() {
+    return {
+      grid: { color: "rgba(122,148,196,0.09)" },
+      ticks: { color: "#7f92b3" }
+    };
+  }
+
+  const distEl = document.getElementById("distChart");
+  if (distEl && stats.total) {
+    new Chart(distEl, {
+      type: "doughnut",
+      data: {
+        labels: ["Credible", "Misleading"],
+        datasets: [{
+          data: [stats.credible, stats.misleading],
+          backgroundColor: ["#2fcf8f", "#ff5d73"],
+          borderColor: "rgba(7,11,20,0.9)",
+          borderWidth: 3,
+          hoverOffset: 6
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: "66%",
+        plugins: {
+          legend: { position: "bottom", labels: { boxWidth: 10, padding: 16 } },
+          tooltip: {
+            callbacks: {
+              label: (c) => ` ${c.label}: ${c.parsed} (${((c.parsed / stats.total) * 100).toFixed(1)}%)`
+            }
+          }
+        }
+      }
+    });
+  }
+
+  const trendEl = document.getElementById("trendChart");
+  if (trendEl) {
+    new Chart(trendEl, {
+      type: "line",
+      data: {
+        labels: trend.labels,
+        datasets: [
+          {
+            label: "Credible", data: trend.credible, borderColor: "#2fcf8f",
+            backgroundColor: "rgba(47,207,143,0.14)", fill: true, tension: 0.35,
+            pointRadius: 2, borderWidth: 2
+          },
+          {
+            label: "Misleading", data: trend.misleading, borderColor: "#ff5d73",
+            backgroundColor: "rgba(255,93,115,0.12)", fill: true, tension: 0.35,
+            pointRadius: 2, borderWidth: 2
+          },
+          {
+            label: "Avg confidence %", data: trend.confidence, borderColor: "#5b8dff",
+            borderDash: [5, 4], pointRadius: 0, borderWidth: 1.6, yAxisID: "y1", fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: gridOpts(),
+          y: { beginAtZero: true, ...gridOpts(), ticks: { precision: 0, color: "#7f92b3" } },
+          y1: {
+            position: "right", beginAtZero: true, max: 100, grid: { display: false },
+            ticks: { color: "#5b8dff", callback: (v) => v + "%" }
+          }
+        },
+        plugins: { legend: { position: "bottom", labels: { boxWidth: 10, padding: 14 } } }
+      }
+    });
+  }
+
+  const platEl = document.getElementById("platformChart");
+  if (platEl && platforms.length) {
+    new Chart(platEl, {
+      type: "bar",
+      data: {
+        labels: platforms.map((p) => p.platform),
+        datasets: [{
+          label: "Analyses",
+          data: platforms.map((p) => p.total),
+          backgroundColor: "rgba(91,141,255,0.55)",
+          borderRadius: 6,
+          barThickness: 16
+        }, {
+          label: "Misleading",
+          data: platforms.map((p) => p.misleading || 0),
+          backgroundColor: "rgba(255,93,115,0.6)",
+          borderRadius: 6,
+          barThickness: 16
+        }]
+      },
+      options: {
+        indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        scales: { x: { beginAtZero: true, ...gridOpts(), ticks: { precision: 0 } }, y: { grid: { display: false }, ticks: { color: "#8fa1c0" } } },
+        plugins: { legend: { position: "bottom", labels: { boxWidth: 10 } } }
+      }
+    });
+  }
+</script>
+{% endblock %}

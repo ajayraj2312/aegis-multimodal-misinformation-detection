@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# App runtime data
+instance/
+artifacts/
+!artifacts/.gitkeep
+*.db
+*.sqlite3
+
+# Model caches
+.cache/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local secrets
+.env
+.dev.vars

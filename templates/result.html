@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}Result #{{ r.id }}{% endblock %}
+{% block crumb %}Detection result{% endblock %}
+{% block heading %}Analysis #{{ r.id }}{% endblock %}
+
+{% block topbar_actions %}
+  <a class="btn-x ghost sm" href="{{ url_for('history') }}">History</a>
+  <a class="btn-x primary sm" href="{{ url_for('analyze') }}">New analysis</a>
+{% endblock %}
+
+{% block content %}
+{% set ta = r.text_analysis or {} %}
+{% set ia = r.image_analysis or {} %}
+{% set stats = ia.statistics if ia else {} %}
+{% set mult = (r.modality == 'multimodal') %}
+{% set verdict_class = 'credible' if r.label == 'Credible' else 'misleading' %}
+
+<div class="card-x" style="margin-bottom:16px">
+  <div class="verdict">
+    <div class="ring" style="--pct: {{ (r.confidence * 100) | round(1) }}">
+      <div class="ring-inner">
+        <div class="ring-val">{{ (r.confidence * 100) | round(1) }}%</div>
+        <div class="ring-lbl">confidence</div>
+      </div>
+    </div>
+    <div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="verdict-label {{ verdict_class }}">{{ r.label }}</span>
+        <span class="badge-x {{ 'neutral' if mult else 'neutral' }}">
+          {{ 'Multimodal (text + image)' if mult else 'Text only · single modality' }}
+        </span>
+      </div>
+      <p class="verdict-sub">{{ r.explanation }}</p>
+      <div class="chip-row" style="margin-top:12px">
+        <span class="tag">P(misleading) = {{ (r.misleading_prob * 100) | round(1) }}%</span>
+        <span class="tag">decision threshold = {{ ((r.threshold or 0.5) * 100) | round(1) }}%</span>
+        {% if r.consistency_label %}
+          <span class="tag {{ 'green' if r.consistency_label == 'Consistent' else 'red' }}">
+            cross-modal: {{ r.consistency_label }}
+          </span>
+        {% endif %}
+        <span class="tag">processed in {{ r.latency_ms }} ms</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if not mult %}
+<div class="alert-x" style="margin-bottom:16px">
+  <strong>Single-modality result.</strong> No image was supplied, so the image branch and the
+  cross-modal consistency check did not run. The image embedding was replaced with a zero
+  vector and the fusion network's modality gate learned to rely on text only. Upload an image
+  for a complete multimodal analysis.
+</div>
+{% endif %}
+
+<div class="grid-2">
+  <div class="card-x">
+    <div class="card-title-x"><span>Submitted post</span><span class="hint">{{ r.created_at[:16].replace('T', ' ') }} UTC</span></div>
+    <p style="font-size:14px;line-height:1.65;color:#dbe5f6;margin:0">{{ r.text }}</p>
+    <div class="kv" style="margin-top:16px">
+      <div class="k">Platform</div><div class="v">{{ r.platform or '—' }}</div>
+      <div class="k">Source / publisher</div><div class="v">{{ r.source or '—' }}</div>
+      <div class="k">Modality</div><div class="v">{{ 'text + image' if mult else 'text only' }}</div>
+      <div class="k">Record</div><div class="v mono">#{{ r.id }}</div>
+    </div>
+  </div>
+
+  <div class="card-x">
+    <div class="card-title-x"><span>Modality contributions</span><span class="hint">leave-one-modality-out ablation</span></div>
+    {% set ct = r.contributions.text or 0 %}
+    {% set ci = r.contributions.image or 0 %}
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px">
+        <span>Text branch</span><span class="mono">{{ ct }}%</span>
+      </div>
+      <div class="meter"><span data-fill="{{ ct }}"></span></div>
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px">
+        <span>Image branch</span><span class="mono">{{ ci }}%</span>
+      </div>
+      <div class="meter green"><span data-fill="{{ ci }}"></span></div>
+    </div>
+    <div class="kv">
+      <div class="k">Text branch score (text-only net)</div><div class="v">{{ ((ta.score or 0) * 100) | round(1) }}%</div>
+      <div class="k">Image branch score (image-only net)</div>
+      <div class="v">{{ ((ia.score or 0) * 100) | round(1) ~ '%' if mult else 'not run' }}</div>
+      <div class="k">Fusion gate → text</div><div class="v">—</div>
+      <div class="k">Fusion output P(misleading)</div><div class="v">{{ (r.misleading_prob * 100) | round(1) }}%</div>
+    </div>
+    <p class="hero-note" style="margin-top:12px">
+      Contributions come from re-running the fusion network with one modality zeroed out and
+      taking the change in P(misleading). They are an ablation measurement, not a hand-set weight.
+    </p>
+  </div>
+</div>
+
+{% if mult %}
+<div class="grid-2" style="margin-top:16px">
+  <div class="card-x">
+    <div class="card-title-x"><span>Cross-modal consistency</span>
+      <span class="badge-x {{ 'credible' if r.consistency_label == 'Consistent' else 'misleading' }}">{{ r.consistency_label or '—' }}</span>
+    </div>
+    <div class="chart-box sm"><canvas id="consChart"></canvas></div>
+    <div class="kv" style="margin-top:12px">
+      <div class="k">Consistency probability</div><div class="v">{{ ((r.consistency.score or 0)) }}%</div>
+      <div class="k">Cosine similarity (shared space)</div><div class="v mono">{{ '%+.4f' | format(r.consistency_cosine or 0) }}</div>
+      <div class="k">Reference: consistent pairs</div>
+      <div class="v mono">{{ '%+.3f' | format(r.consistency.calibration.consistent_mean_cosine or 0) if r.consistency.calibration else '—' }}</div>
+      <div class="k">Reference: inconsistent pairs</div>
+      <div class="v mono">{{ '%+.3f' | format(r.consistency.calibration.inconsistent_mean_cosine or 0) if r.consistency.calibration else '—' }}</div>
+    </div>
+    <p class="hero-note" style="margin-top:10px">{{ r.consistency.verdict }}</p>
+  </div>
+
+  <div class="card-x">
+    <div class="card-title-x"><span>Uploaded image</span><span class="hint">{{ stats.width }}×{{ stats.height }} · {{ stats.format }}</span></div>
+    {% if r.image_url %}
+      <div class="preview-wrap" style="margin-bottom:12px">
+        <img src="{{ r.image_url }}" alt="Analyzed image">
+      </div>
+    {% endif %}
+    <div class="kv">
+      <div class="k">File</div><div class="v mono">{{ stats.filename or r.image_name or '—' }}</div>
+      <div class="k">Brightness / contrast</div><div class="v mono">{{ stats.brightness }} / {{ stats.contrast }}</div>
+      <div class="k">Edge density</div><div class="v mono">{{ stats.edge_density }}</div>
+      <div class="k">Sharpness (Laplacian var.)</div><div class="v mono">{{ stats.sharpness }}</div>
+      <div class="k">JPEG quality estimate</div><div class="v mono">{{ stats.jpeg_quality_estimate if stats.jpeg_quality_estimate else 'n/a' }}</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="grid-2" style="margin-top:16px">
+  <div class="card-x">
+    <div class="card-title-x"><span>Text analysis · Transformer</span>
+      <span class="hint">{{ ta.encoder.model if ta.encoder else 'DistilBERT' }}</span>
+    </div>
+    <div class="kv">
+      <div class="k">Tokens (WordPiece)</div><div class="v mono">{{ ta.tokens or '—' }}{% if ta.truncated %} (truncated){% endif %}</div>
+      <div class="k">Embedding dimensions</div><div class="v mono">{{ ta.embedding.dimensions or 768 }}</div>
+      <div class="k">Embedding L2 norm</div><div class="v mono">{{ ta.embedding.l2_norm or '—' }}</div>
+      <div class="k">Text-only P(misleading)</div><div class="v">{{ ((ta.score or 0) * 100) | round(1) }}%</div>
+    </div>
+
+    <div style="margin-top:14px">
+      <div class="card-title-x" style="margin-bottom:8px"><span>Linguistic features</span></div>
+      {% set f = ta.features or {} %}
+      <div class="kv">
+        <div class="k">Words / sentences</div><div class="v mono">{{ f.words or 0 }} / {{ f.sentences or 0 }}</div>
+        <div class="k">Uppercase ratio</div><div class="v mono">{{ ((f.uppercase_ratio or 0) * 100) | round(1) }}%</div>
+        <div class="k">Exclamation / question marks</div><div class="v mono">{{ f.exclamation_marks or 0 }} / {{ f.question_marks or 0 }}</div>
+        <div class="k">Lexical diversity</div><div class="v mono">{{ f.lexical_diversity or 0 }}</div>
+      </div>
+      {% if f.sensational_terms %}
+        <div style="margin-top:10px">
+          <div class="tiny muted" style="margin-bottom:6px">Cue vocabulary detected</div>
+          <div class="chip-row">
+            {% for term in f.sensational_terms %}<span class="tag warn">{{ term }}</span>{% endfor %}
+          </div>
+        </div>
+      {% endif %}
+      {% if f.institutional_terms %}
+        <div style="margin-top:10px">
+          <div class="tiny muted" style="margin-bottom:6px">Institutional attribution</div>
+          <div class="chip-row">
+            {% for term in f.institutional_terms %}<span class="tag green">{{ term }}</span>{% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card-x">
+    <div class="card-title-x"><span>Token-level influence</span>
+      <span class="hint">occlusion attribution</span>
+    </div>
+    {% set attr = ta.attribution or {} %}
+    {% if attr.words %}
+      <p class="hero-note" style="margin-bottom:12px">
+        Each word was removed in turn and the fusion classifier re-run. Red chips pulled the
+        prediction towards <em>misleading</em>; green chips pulled it towards <em>credible</em>.
+      </p>
+      {% if attr.towards_misleading %}
+        <div class="tiny muted" style="margin-bottom:6px">Towards misleading</div>
+        <div class="chip-row" style="margin-bottom:12px">
+          {% for w in attr.towards_misleading %}
+            <span class="token-chip pos">{{ w.token }} <span class="w">{{ '%+.3f' | format(w.impact) }}</span></span>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if attr.towards_credible %}
+        <div class="tiny muted" style="margin-bottom:6px">Towards credible</div>
+        <div class="chip-row">
+          {% for w in attr.towards_credible %}
+            <span class="token-chip neg">{{ w.token }} <span class="w">{{ '%+.3f' | format(w.impact) }}</span></span>
+          {% endfor %}
+        </div>
+      {% endif %}
+      <div class="kv" style="margin-top:14px">
+        <div class="k">Baseline P(misleading) with full text</div><div class="v mono">{{ attr.baseline }}</div>
+        <div class="k">Words tested</div><div class="v mono">{{ attr.words_tested }}</div>
+      </div>
+    {% else %}
+      <p class="muted tiny">
+        Token attribution was not computed for this record
+        {% if attr.method %}({{ attr.method }}){% endif %}.
+        Open a fresh analysis to see per-word influence.
+      </p>
+    {% endif %}
+  </div>
+</div>
+
+{% if mult and stats.artefact_flags %}
+<div class="card-x" style="margin-top:16px">
+  <div class="card-title-x"><span>Visual artefact indicators</span>
+    <span class="hint">heuristic pixel statistics — not a forensic manipulation detector</span>
+  </div>
+  <table class="table-x">
+    <thead><tr><th>Indicator</th><th>Measurement</th><th>Severity</th><th>Interpretation</th></tr></thead>
+    <tbody>
+      {% for flag in stats.artefact_flags %}
+      <tr>
+        <td>{{ flag.name }}</td>
+        <td class="mono">{{ flag.value }}</td>
+        <td><span class="tag {{ 'red' if flag.severity == 'medium' else 'warn' }}">{{ flag.severity }}</span></td>
+        <td class="muted tiny">{{ flag.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card-x" style="margin-top:16px">
+  <div class="card-title-x"><span>Why this result</span><span class="hint">generated from model outputs</span></div>
+  <p style="font-size:13.5px;line-height:1.75;color:#cdd9ee;margin:0">{{ r.explanation }}</p>
+</div>
+
+<div class="alert-x" style="margin-top:16px">{{ r.disclaimer or disclaimer }}</div>
+
+<div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap">
+  <a class="btn-x primary" href="{{ url_for('analyze') }}">Analyze another post</a>
+  <a class="btn-x ghost" href="{{ url_for('history') }}">Back to history</a>
+  <form method="post" action="{{ url_for('delete_analysis', analysis_id=r.id) }}"
+        onsubmit="return confirm('Delete this record?')" style="margin-left:auto">
+    <button class="btn-x danger-ghost" type="submit">Delete record</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const ct = Number({{ (r.contributions.text or 0) | tojson }});
+  const ci = Number({{ (r.contributions.image or 0) | tojson }});
+  const contribEl = document.getElementById("contribChart");
+  if (contribEl) {
+    new Chart(contribEl, {
+      type: "doughnut",
+      data: {
+        labels: ["Text", "Image"],
+        datasets: [{ data: [ct, ci], backgroundColor: ["#5b8dff", "#38d9c4"],
+                     borderColor: "rgba(7,11,20,.9)", borderWidth: 3 }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, cutout: "62%",
+                 plugins: { legend: { position: "bottom", labels: { boxWidth: 10 } } } }
+    });
+  }
+
+  const consEl = document.getElementById("consChart");
+  if (consEl) {
+    const p = Number({{ (r.consistency.score or 0) | tojson }});
+    new Chart(consEl, {
+      type: "bar",
+      data: {
+        labels: ["Consistency probability", "Cosine similarity (scaled)"],
+        datasets: [{
+          data: [p, Math.max(0, Math.min(100, (Number({{ (r.consistency_cosine or 0) | tojson }}) + 1) * 50))],
+          backgroundColor: ["rgba(56,217,196,0.55)", "rgba(91,141,255,0.5)"],
+          borderRadius: 8, barThickness: 26
+        }]
+      },
+      options: {
+        indexAxis: "y", responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, max: 100, grid: { color: "rgba(122,148,196,.09)" },
+               ticks: { color: "#7f92b3", callback: (v) => v + "%" } },
+          y: { grid: { display: false }, ticks: { color: "#8fa1c0" } }
+        }
+      }
+    });
+  }
+</script>
+{% endblock %}
