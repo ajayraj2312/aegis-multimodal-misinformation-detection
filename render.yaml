@@ -10,7 +10,8 @@ services:
     buildCommand: "./build.sh"
     startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 180 --preload"
     healthCheckPath: /healthz
-    autoDeploy: true
+    # Recommended for Blueprint repos that are deployed via the "Deploy to Render" button.
+    autoDeployTrigger: off
     envVars:
       - key: PYTHON_VERSION
         value: "3.10.13"

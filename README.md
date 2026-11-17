@@ -134,13 +134,17 @@ explanation) and stores the record.
 
 ## 7. Deploying to Render
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ajayraj2312/aegis-multimodal-misinformation-detection)
+
 The repository ships a `render.yaml` Blueprint, `build.sh` (installs CPU-only PyTorch on Linux)
 and a `Procfile`.
 
 1. Push this repository to GitHub (public).
-2. On Render: **New → Blueprint**, pick the repository, apply. `render.yaml` supplies the build
-   command, start command, health check and environment variables.
-3. Wait for the build (≈6–10 min: PyTorch wheel + model downloads) and open the service URL.
+2. Click the **Deploy to Render** button above, or on Render: **New → Blueprint**, pick the
+   repository, then approve the service it proposes. `render.yaml` supplies the build command,
+   start command, health check and every environment variable, so there is nothing to fill in.
+3. Wait for the build (≈6–10 min: the CPU PyTorch wheel plus the model weight downloads) and
+   open the service URL. The health check is `/healthz`.
 
 Notes for the free tier (`plan: free`, 512 MB RAM):
 
