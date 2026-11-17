@@ -25,3 +25,7 @@ artifacts/
 # Local secrets
 .env
 .dev.vars
+
+# Local deploy credentials (never commit)
+render-api-key.txt
+.render-api-key
